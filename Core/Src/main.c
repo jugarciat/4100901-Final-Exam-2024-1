@@ -42,7 +42,7 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+#define AWAKE_TIME (5 * 1000) // 5 segundos
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/

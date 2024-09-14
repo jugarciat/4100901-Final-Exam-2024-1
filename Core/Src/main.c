@@ -80,11 +80,134 @@ static void MX_I2C1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/**
+ * @brief Función para transmitir datos a través del UART.
+ * @param file: Descriptor del archivo (no utilizado).
+ * @param ptr: Puntero al buffer de datos a transmitir.
+ * @param len: Número de bytes a transmitir.
+ * @retval Número de bytes transmitidos.
+ */
 int _write(int file, char *ptr, int len)
 {
   HAL_UART_Transmit(&huart2, (uint8_t *)ptr, len, 10);
   return len;
 }
+
+
+/**
+  * @brief  Configura el reloj del sistema para usar el oscilador interno MSI (Multi-Speed Internal)
+  *         en lugar del HSI (High-Speed Internal). Esto reduce el consumo de energía al usar un
+  *         reloj interno de menor frecuencia. El reloj del sistema se establece en la gama 0 del MSI
+  *         (100 kHz).
+  *
+  *         La función realiza los siguientes pasos:
+  *         1. Configura el oscilador MSI en el rango 0 (100 kHz).
+  *         2. Establece el MSI como la fuente del reloj del sistema.
+  *         3. Desactiva el HSI para reducir el consumo de energía.
+  *
+  * @retval None
+  */
+void SystemClock_Decrease(void)
+{
+    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+
+    /* Configuración del oscilador MSI en el rango 0 (100 kHz) */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+    RCC_OscInitStruct.MSIState = RCC_MSI_ON;
+    RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_0;
+    RCC_OscInitStruct.MSICalibrationValue = RCC_MSICALIBRATION_DEFAULT;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+
+    // Configura el oscilador MSI
+    if(HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+    {
+        // Error en la inicialización del oscilador MSI
+        Error_Handler();
+    }
+
+    /* Selecciona el MSI como fuente del reloj del sistema y mantiene los divisores de HCLK, PCLK1 y PCLK2 */
+    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_SYSCLK;
+    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+
+    // Configura el reloj del sistema para usar el MSI
+    if(HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+    {
+        // Error en la configuración del reloj del sistema
+        Error_Handler();
+    }
+
+    /* Desactiva el HSI para reducir el consumo de energía ya que se usa MSI a partir de este punto */
+    __HAL_RCC_HSI_DISABLE();
+}
+
+
+
+
+
+/**
+ * @brief Callback que se ejecuta cuando se recibe un dato a través de USART2.
+ * @param huart: Handler del UART que generó la interrupción.
+ */
+
+
+
+/**
+  * @brief  Enters a low-power sleep mode to reduce power consumption.
+  *         The microcontroller will enter sleep mode for a specified duration,
+  *         during which most peripherals will be disabled to save power.
+  *         The system will wake up when the user push-button is pressed.
+  *
+  *         This function uses the System Tick Timer (SysTick) to keep track of
+  *         the sleep duration. When the specified awake time has elapsed,
+  *         the system will re-enable the necessary peripherals and resume normal operation.
+  *
+  * @note   The awake time is defined as 5 seconds (5000 milliseconds).
+  *         The function disables all AHB and APB peripherals to minimize power consumption.
+  *         It also suspends the SysTick timer to prevent unwanted wake-ups and then resumes it
+  *         after exiting sleep mode.
+  *
+  * @retval None
+  */
+void low_power_sleep_mode(void)
+{
+    #define AWAKE_TIME (5 * 1000) // 5 segundos (5000 milisegundos)
+
+    static uint32_t sleep_tick = AWAKE_TIME; // Inicializa el tiempo de sueño
+
+    // Verifica si el tiempo actual es menor que el tiempo de sueño restante
+    if (sleep_tick > HAL_GetTick()) {
+        return; // No es momento de entrar en modo de sueño
+    }
+
+    printf("Sleeping\r\n");
+
+    // Actualiza el tiempo de sueño para la próxima vez
+    sleep_tick = HAL_GetTick() + AWAKE_TIME;
+
+    // Desactiva los relojes de los periféricos AHB y APB para reducir el consumo de energía
+    RCC->AHB1SMENR  = 0x0;
+    RCC->AHB2SMENR  = 0x0;
+    RCC->AHB3SMENR  = 0x0;
+
+    RCC->APB1SMENR1 = 0x0;
+    RCC->APB1SMENR2 = 0x0;
+    RCC->APB2SMENR  = 0x0;
+
+    // Suspende el incremento del SysTick para evitar que el modo de sueño sea interrumpido
+    HAL_SuspendTick();
+
+    // Entra en modo de sueño. El microcontrolador se despertará cuando se presione el botón del usuario
+    HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
+
+    // Reanuda el interruptor del SysTick si fue deshabilitado antes de entrar en modo de sueño
+    HAL_ResumeTick();
+
+    printf("Awake\r\n");
+}
+
+
+
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -100,7 +223,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
     }
 }
 
-
+/**
+ * @brief Muestra el valor del keypad en la pantalla OLED.
+ * @param value: Valor a mostrar.
+ */
 
 
 void display_keypad_value(uint16_t value) {
@@ -122,6 +248,11 @@ void display_keypad_value(uint16_t value) {
     // Actualizar la pantalla para mostrar los cambios
     ssd1306_UpdateScreen();
 }
+
+/**
+ * @brief Muestra el valor recibido por USART en la pantalla OLED.
+ * @param value: Valor a mostrar.
+ */
 void display_usart_value(uint32_t value) {
     ssd1306_SetCursor(0, 20);  // Ajustar cursor para mostrar en otra línea
     char buffer[10];
@@ -129,6 +260,11 @@ void display_usart_value(uint32_t value) {
     ssd1306_WriteString(buffer, Font_7x10, White);
     ssd1306_UpdateScreen();
 }
+
+/**
+ * @brief Callback de interrupción del GPIO.
+ * @param GPIO_Pin: Pin que generó la interrupción.
+ */
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {

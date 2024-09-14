@@ -60,6 +60,13 @@ ring_buffer_t keypad_rb;
 uint8_t usart2_data = 0xFF;
 uint8_t usart2_buffer[USART2_RB_LEN];
 ring_buffer_t usart2_rb;
+
+#define KEYPAD_MAX_DIGITS 4
+uint16_t keypad_value = 0;  // Almacenar el valor actual del keypad
+uint8_t keypad_digit_count = 0;  // Número de dígitos recibidos
+// Declarar las variables globalmente
+
+uint32_t usart_value = 0;   // Valor recibido por USART2
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -82,30 +89,71 @@ int _write(int file, char *ptr, int len)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	/* Data received in USART2 */
-	if (huart->Instance == USART2) {
-		if (usart2_data >= '0' && usart2_data <= '9') {
-			ring_buffer_write(&usart2_rb, usart2_data);
-			if (ring_buffer_is_full(&keypad_rb) != 0) {
+    if (huart->Instance == USART2) {
+        if (usart2_data >= '0' && usart2_data <= '9') {
+            ring_buffer_write(&usart2_rb, usart2_data);
+            usart_value = usart_value * 10 + (usart2_data - '0');
+        } else if (usart2_data == '#') {
+            usart_value = 0;  // Reiniciar el valor por USART2
+        }
+        HAL_UART_Receive_IT(&huart2, &usart2_data, 1);
+    }
+}
 
-			}
-		}
-		HAL_UART_Receive_IT(&huart2, &usart2_data, 1);
-	}
+
+
+
+void display_keypad_value(uint16_t value) {
+    // Limpiar la pantalla antes de escribir el nuevo valor
+    ssd1306_Fill(Black);
+
+    // Mover el cursor a una posición visible (por ejemplo, en la parte superior de la pantalla)
+    ssd1306_SetCursor(0, 0);
+
+    // Crear un buffer para almacenar el texto que se va a mostrar
+    char buffer[10];
+
+    // Convertir el valor numérico a una cadena de caracteres
+    sprintf(buffer, "Keypad: %d", value);
+
+    // Escribir la cadena en la pantalla OLED
+    ssd1306_WriteString(buffer, Font_7x10, White);
+
+    // Actualizar la pantalla para mostrar los cambios
+    ssd1306_UpdateScreen();
+}
+void display_usart_value(uint32_t value) {
+    ssd1306_SetCursor(0, 20);  // Ajustar cursor para mostrar en otra línea
+    char buffer[10];
+    sprintf(buffer, "USART: %d", value);  // Mostrar el valor de USART
+    ssd1306_WriteString(buffer, Font_7x10, White);
+    ssd1306_UpdateScreen();
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	if (GPIO_Pin == B1_Pin) {
+    if (GPIO_Pin == B1_Pin) {
+        uint32_t result = keypad_value + usart_value;
+        char buffer[50];
 
-		return;
-	}
-	uint8_t key_pressed = keypad_scan(GPIO_Pin);
-	if (key_pressed != 0xFF) {
-		ring_buffer_write(&keypad_rb, keypad_data);
-		if (ring_buffer_is_full(&keypad_rb) != 0) {
+        // Mostrar resultado en OLED
+        ssd1306_Fill(Black);  // Limpiar pantalla
+        ssd1306_SetCursor(0, 0);
+        sprintf(buffer, "Sum: %lu", result);
+        ssd1306_WriteString(buffer, Font_7x10, White);
+        ssd1306_UpdateScreen();
 
-		}
-	}
+        // Enviar resultado al PC por USART2
+        sprintf(buffer, "Result: %lu\r\n", result);
+        HAL_UART_Transmit(&huart2, (uint8_t *)buffer, strlen(buffer), HAL_MAX_DELAY);
+
+        // Encender o apagar el LED según si el resultado es par o impar
+        if (result % 2 == 0) {
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);  // Encender LED
+        } else {
+            HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);  // Apagar LED
+        }
+    }
 }
 /* USER CODE END 0 */
 
